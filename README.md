@@ -1,3 +1,15 @@
+## Fork information [!!!]
+
+This fork adds support in a really dirty way to utilize Azure OCR services.
+For more information, take a look in settings.py, where:
+```
+OCR_AZURE_ENDPOINT = os.getenv("PAPERLESS_AZURE_OCR_ENDPOINT", None)
+OCR_AZURE_KEY = os.getenv("PAPERLESS_AZURE_OCR_KEY", None)
+```
+These two values if set will allow you to use [Azure computer vision](https://docs.microsoft.com/pl-pl/azure/cognitive-services/computer-vision/quickstarts/python-print-text).
+Please note in order to use this, you have to generate API key, but this is not described yet. Please know what you're doing.
+
+
 [ en | [de](README-de.md) | [el](README-el.md) ]
 
 ![Paperless](https://raw.githubusercontent.com/the-paperless-project/paperless/master/src/paperless/static/paperless/img/logo-dark.png)
@@ -18,6 +30,7 @@ I hate paper.  Environmental issues aside, it's a tech person's nightmare:
 * Backups mean more paper
 
 In the past few months I've been bitten more than a few times by the problem of not having the right document around.  Sometimes I recycled a document I needed (who keeps water bills for two years?) and other times I just lost it... because paper.  I wrote this to make my life easier.
+
 
 
 ## How it Works

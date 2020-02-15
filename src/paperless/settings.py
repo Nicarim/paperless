@@ -60,7 +60,7 @@ if _allowed_hosts:
     ALLOWED_HOSTS = _allowed_hosts.split(",")
 
 FORCE_SCRIPT_NAME = os.getenv("PAPERLESS_FORCE_SCRIPT_NAME")
-    
+
 # Application definition
 
 INSTALLED_APPS = [
@@ -249,6 +249,9 @@ LOGGING = {
 # The default language that tesseract will attempt to use when parsing
 # documents.  It should be a 3-letter language code consistent with ISO 639.
 OCR_LANGUAGE = os.getenv("PAPERLESS_OCR_LANGUAGE", "eng")
+
+OCR_AZURE_ENDPOINT = os.getenv("PAPERLESS_AZURE_OCR_ENDPOINT", None)
+OCR_AZURE_KEY = os.getenv("PAPERLESS_AZURE_OCR_KEY", None)
 
 # The amount of threads to use for OCR
 OCR_THREADS = os.getenv("PAPERLESS_OCR_THREADS")

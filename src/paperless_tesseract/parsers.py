@@ -2,19 +2,26 @@ import itertools
 import os
 import re
 import subprocess
+import tempfile
+import time
+from io import BytesIO
 from multiprocessing.pool import Pool
 
 import langdetect
+import pdftotext
 import pyocr
-from django.conf import settings
 from PIL import Image
+from azure.cognitiveservices.vision.computervision import ComputerVisionClient
+from azure.cognitiveservices.vision.computervision.models import \
+    TextOperationStatusCodes, ComputerVisionErrorException
+from django.conf import settings
+from msrest.authentication import CognitiveServicesCredentials
 from pyocr.libtesseract.tesseract_raw import \
     TesseractError as OtherTesseractError
 from pyocr.tesseract import TesseractError
 
-import pdftotext
 from documents.parsers import DocumentParser, ParseError
-
+from paperless.settings import OCR_AZURE_ENDPOINT, OCR_AZURE_KEY
 from .languages import ISO639
 
 
@@ -208,6 +215,58 @@ class RasterisedDocumentParser(DocumentParser):
                 "of Tesseract.".format(guessed_language)
             )
 
+    def _ocr_from_azure_img(self, img, lang):
+        pimg = Image.open(img)
+        temp = BytesIO()
+        with tempfile.TemporaryFile(dir='/tmp/') as f:
+            pimg.save(f, format='png')
+            f.seek(0)
+            creds = CognitiveServicesCredentials(OCR_AZURE_KEY)
+            cv_client = ComputerVisionClient(OCR_AZURE_ENDPOINT, creds)
+            while True:
+                try:
+                    rp_res = cv_client.batch_read_file_in_stream(f, raw=True)
+                    break
+                except ComputerVisionErrorException as e:
+                    if e.response.status_code == 429:
+                        print(
+                            "Exceeded quota for this minute, waiting 20 seconds...")
+                        time.sleep(20)
+                        continue
+                    json_error = e.response.json()
+                    if 'error' in json_error and 'code' in json_error['error']:
+                        if json_error['error']['code'] == "InvalidImage":
+                            self.log('error',
+                                     'Azure couldn\'t recognize given image')
+                            # TODO: Find out for what images does it happen
+                            # TODO: We return instead of raising - let's just omit this error and mark it in a document
+                            return '\n\n< invalid image >\n\n'
+
+                    self.log('error',
+                             'Response from azure is containing an error')
+                    self.log('error', e.response.text)
+                    time.sleep(60)
+                    raise
+
+        # Get the operation location (URL with an ID at the end) from the response
+        operation_location_remote = rp_res.headers["Operation-Location"]
+        # Grab the ID from the URL
+        operation_id = operation_location_remote.split("/")[-1]
+        while True:
+            get_printed_text_results = cv_client.get_read_operation_result(
+                operation_id)
+            if get_printed_text_results.status not in ['NotStarted',
+                                                       'Running']:
+                break
+            self.log('info', 'Waiting for Azure response...')
+            time.sleep(5)
+        text_response = []
+        if get_printed_text_results.status == TextOperationStatusCodes.succeeded:
+            for text_result in get_printed_text_results.recognition_results:
+                for line in text_result.lines:
+                    text_response.append(line.text)
+        return '\n'.join(text_response)
+
     def _ocr(self, imgs, lang):
         """
         Performs a single OCR attempt.
@@ -217,9 +276,16 @@ class RasterisedDocumentParser(DocumentParser):
             return ""
 
         self.log("info", "Parsing for {}".format(lang))
-
-        with Pool(processes=self.THREADS) as pool:
-            r = pool.map(image_to_string, itertools.product(imgs, [lang]))
+        # TODO: USE AZURE LOL
+        r = None
+        if not OCR_AZURE_ENDPOINT:
+            with Pool(processes=self.THREADS) as pool:
+                r = pool.map(image_to_string, itertools.product(imgs, [lang]))
+                r = " ".join(r)
+        else:
+            r = []
+            for img in imgs:
+                r.append(self._ocr_from_azure_img(img, lang))
             r = " ".join(r)
 
         # Strip out excess white space to allow matching to go smoother
@@ -236,7 +302,6 @@ class RasterisedDocumentParser(DocumentParser):
 
 
 def run_convert(*args):
-
     environment = os.environ.copy()
     if settings.CONVERT_MEMORY_LIMIT:
         environment["MAGICK_MEMORY_LIMIT"] = settings.CONVERT_MEMORY_LIMIT
@@ -278,7 +343,6 @@ def image_to_string(args):
 
 
 def get_text_from_pdf(pdf_file):
-
     with open(pdf_file, "rb") as f:
         try:
             pdf = pdftotext.PDF(f)
